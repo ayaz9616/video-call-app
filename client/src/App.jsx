@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { io } from "socket.io-client";
+import './index.css'; 
 
 const socket = io("https://video-call-app-lwxn.onrender.com"); // Replace with your server URL
 
