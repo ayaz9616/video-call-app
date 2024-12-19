@@ -1,12 +1,12 @@
 import React, { useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
 
-const socket = io("https://video-call-app-lwxn.onrender.com");
+const socket = io("https://video-call-app-lwxn.onrender.com"); // Replace with your deployed backend URL
 
 const App = () => {
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
-  const peerConnectionRef = useRef(null);
+  const peerConnections = useRef({});
   const [roomId, setRoomId] = useState("");
   const [isConnected, setIsConnected] = useState(false);
 
@@ -15,64 +15,79 @@ const App = () => {
   };
 
   useEffect(() => {
-    // Handle signaling messages
+    // Handle user joined
+    socket.on("user-joined", (newUserId) => {
+      console.log("New user joined:", newUserId);
+      createOffer(newUserId);
+    });
+
+    // Handle WebRTC signaling
     socket.on("webrtc-signal", async (data) => {
-      if (data.signal.type === "offer") {
-        const peerConnection = createPeerConnection();
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.signal));
+      const { sender, signal } = data;
+
+      if (!peerConnections.current[sender]) {
+        createPeerConnection(sender);
+      }
+
+      const peerConnection = peerConnections.current[sender];
+
+      if (signal.type === "offer") {
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(signal));
         const answer = await peerConnection.createAnswer();
         await peerConnection.setLocalDescription(answer);
-
-        socket.emit("webrtc-signal", {
-          target: data.sender,
-          signal: answer,
-        });
-      } else if (data.signal.type === "answer") {
-        await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.signal));
-      } else if (data.signal.candidate) {
-        const candidate = new RTCIceCandidate(data.signal.candidate);
-        peerConnectionRef.current.addIceCandidate(candidate);
+        socket.emit("webrtc-signal", { target: sender, signal: answer });
+      } else if (signal.type === "answer") {
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(signal));
+      } else if (signal.candidate) {
+        peerConnection.addIceCandidate(new RTCIceCandidate(signal));
       }
     });
 
-    return () => socket.off("webrtc-signal");
+    return () => {
+      socket.off("user-joined");
+      socket.off("webrtc-signal");
+    };
   }, []);
 
-  const createPeerConnection = () => {
+  const createPeerConnection = (userId) => {
     const peerConnection = new RTCPeerConnection(servers);
 
     peerConnection.onicecandidate = (event) => {
       if (event.candidate) {
         socket.emit("webrtc-signal", {
-          target: roomId,
+          target: userId,
           signal: event.candidate,
         });
       }
     };
 
     peerConnection.ontrack = (event) => {
+      console.log("Received remote stream");
       remoteVideoRef.current.srcObject = event.streams[0];
     };
 
-    peerConnectionRef.current = peerConnection;
+    peerConnections.current[userId] = peerConnection;
     return peerConnection;
   };
 
-  const joinRoom = () => {
+  const createOffer = async (userId) => {
+    const peerConnection = createPeerConnection(userId);
+
+    const stream = localVideoRef.current.srcObject;
+    stream.getTracks().forEach((track) => peerConnection.addTrack(track, stream));
+
+    const offer = await peerConnection.createOffer();
+    await peerConnection.setLocalDescription(offer);
+
+    socket.emit("webrtc-signal", { target: userId, signal: offer });
+  };
+
+  const joinRoom = async () => {
     socket.emit("join-room", roomId);
     setIsConnected(true);
 
-    navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then((stream) => {
-      localVideoRef.current.srcObject = stream;
-
-      const peerConnection = createPeerConnection();
-      stream.getTracks().forEach((track) => peerConnection.addTrack(track, stream));
-
-      peerConnection.createOffer().then((offer) => {
-        peerConnection.setLocalDescription(offer);
-        socket.emit("webrtc-signal", { target: roomId, signal: offer });
-      });
-    });
+    const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+    localVideoRef.current.srcObject = stream;
   };
 
   return (
@@ -90,7 +105,7 @@ const App = () => {
         </div>
       ) : (
         <div>
-          <video ref={localVideoRef} autoPlay playsInline  style={{ width: "300px", margin: "10px" }} />
+          <video ref={localVideoRef} autoPlay playsInline style={{ width: "300px", margin: "10px" }} />
           <video ref={remoteVideoRef} autoPlay playsInline style={{ width: "300px", margin: "10px" }} />
         </div>
       )}
