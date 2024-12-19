@@ -39,7 +39,7 @@ function App() {
 
   return (
     <div className="min-h-screen bg-emerald-400 text-white flex flex-col items-center justify-center">
-      <h1 className="text-3xl mb-5">Video Call App</h1>
+      <h1 className="text-3xl mb-5">A Video Call App</h1>
       {!isConnected ? (
         <div className="flex flex-col items-center">
           <input
